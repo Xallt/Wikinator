@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from Scripts import searchers, targeter
 import multiprocessing as mp
+
+import requests
+
+from Scripts import searchers, targeter
 
 SEARCHERS = {
     "Biology" : searchers.BiologySearcher,
@@ -24,9 +27,13 @@ class TermHighlighter:
     def get_mode_links(mode):
         if mode not in SEARCHERS:
             return None
-        links = SEARCHERS[mode].get_term_links()
-        print("Got " + mode)
-        return links
+        try:
+            links = SEARCHERS[mode].get_term_links()
+            print("Got " + mode)
+            return links
+        except requests.exceptions.RequestException:
+            print("Skipped " + mode + " (failed to resolve)")
+            return None
     def __init__(self, modes):
         self.searchers_dict = {}
         q = mp.Pool()
