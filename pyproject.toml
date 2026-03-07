@@ -1,0 +1,11 @@
+[project]
+name = "wikinator"
+version = "0.1.0"
+description = "Detects science terms in text and links them to reference pages"
+requires-python = ">=3.10"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "flask>=3.1.3",
+    "nltk>=3.9.3",
+    "requests>=2.32.5",
+]
