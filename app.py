@@ -18,6 +18,7 @@ term_highlighter = TermHighlighter(MODES)
 print('APP READY')
 
 def normalize_text(text):
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
     return text.replace('\xa0', ' ')
 
 @app.route('/')
