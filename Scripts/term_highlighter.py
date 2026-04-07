@@ -56,6 +56,8 @@ class TermHighlighter:
             self.targeter = targeter.WikiTargeter()
         elif mode == 'Wiktionary' and mode in self.modes:
             self.targeter = targeter.WiktionaryTargeter()
+        else:
+            raise ValueError("Invalid mode: " + mode)
     def highlight_text(self, text):
         if self.targeter is None:
             raise ValueError("Targeter is not initialized")
