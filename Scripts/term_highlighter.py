@@ -13,6 +13,8 @@ SEARCHERS = {
     "Astronomy" : searchers.AstronomicalSearcher
 }
 
+DEFAULT_SEPS=list('\n\t .,/\\<>?!@"\'#$%^&*()[]{}:;~`|+' + u'«»') + ['- ', ' -']
+
 class TermHighlighter:
     @staticmethod
     def highlight_term(word, term_link, definition):
@@ -55,36 +57,39 @@ class TermHighlighter:
         elif mode == 'Wiktionary' and mode in self.modes:
             self.targeter = targeter.WiktionaryTargeter()
     def highlight_text(self, text):
+        if self.targeter is None:
+            raise ValueError("Targeter is not initialized")
         if self.targeter.targets_many():
             return self.highlight_many(text)
         else:
             return self.highlight_single(text)
-    def highlight_single(self, text):
+    def highlight_single(self, text, seps=DEFAULT_SEPS):
+        if self.targeter is None:
+            raise ValueError("Targeter is not initialized")
         for s in seps:
             if s in text:
-                return s.join([self.choose_words(t) for t in text.split(s)])
+                return s.join([self.choose_words(t, seps) for t in text.split(s)])
         parsed_word = self.targeter.match_word(text)
         if parsed_word is None:
             return text
         else:
-            return TermHighlighter.highlight_term(text, parsed_word['link'], parsed_word['definition'])
+            return TermHighlighter.highlight_term(text, parsed_word.link, parsed_word.definition)
     def highlight_many(self, text):
-        form_text, words = TermHighlighter.choose_words(text)
-        print(form_text, words)
-        matches = self.targeter.match_words(words)
-        print(matches)
-        if matches is not None:
-            res = []
-            for w in words:
-                if w.lower() in matches:
-                    res.append(TermHighlighter.highlight_term(w, matches[w.lower()]['link'], matches[w.lower()]['definition']))
-                else:
-                    res.append(w)
-            return form_text.format(*res)
-        else:
-            return text
+        if self.targeter is None:
+            raise ValueError("Targeter is not initialized")
+        form_text, words = TermHighlighter.choose_words(text, DEFAULT_SEPS)
+        matches: dict[str, targeter.MatchResult | None] = self.targeter.match_words(words)
+
+        res = []
+        for w in words:
+            match = matches.get(w.lower())
+            if match is not None:
+                res.append(TermHighlighter.highlight_term(w, match.link, match.definition))
+            else:
+                res.append(w)
+        return form_text.format(*res)
     @staticmethod
-    def choose_words(text, seps=list('\n\t .,/\\<>?!@"\'#$%^&*()[]{}:;~`|+' + u'«»') + ['- ', ' -']):
+    def choose_words(text, seps=DEFAULT_SEPS):
         for s in seps:
             if s in text:
                 ss, ww = [], []

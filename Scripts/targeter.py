@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from Scripts import searchers
 from nltk.stem.snowball import RussianStemmer
 from requests import get
@@ -12,16 +13,18 @@ def ffilter(f, ar):
 def fmap(f, ar):
     return list(map(f, ar))
 
+@dataclass
+class MatchResult:
+    link: str | None
+    definition: str | None
+
 class Targeter:
     many_targeting = False
     @staticmethod
     def word_root_match(word1, word2, stemmer):
         return stemmer.stem(word1) == stemmer.stem(word2)
-    def match_word(self, word):
-        return {
-            'link' : None,
-            'definition' : None
-        }
+    def match_word(self, word) -> MatchResult | None:
+        raise NotImplementedError("Subclass must implement this method")
     @classmethod
     def targets_many(cls):
         return cls.many_targeting
@@ -40,7 +43,7 @@ class TermListTargeter(Targeter):
             future_links_searcher[TermListTargeter.true_stem(stemmer, t.word.lower())] = t
         return future_links_searcher
 
-    def match_word(self, word):
+    def match_word(self, word) -> MatchResult | None:
         match = self.term_searcher.get(TermListTargeter.true_stem(self.stemmer, word.lower()))
         if match is None:
             return None
@@ -51,10 +54,7 @@ class TermListTargeter(Targeter):
             # print(definition)
             if (definition is not None) and (len(definition) > 200):
                 definition = definition[:200] + '...'
-            return {
-                'link' : match.link,
-                'definition' : definition
-            }
+            return MatchResult(match.link, definition)
     def match_words(self, words):
         q = mp.Pool()
         matches = q.map(self.match_word, words)
@@ -73,7 +73,7 @@ class WikiTargeter(Targeter):
     @staticmethod
     def only_letters(word):
         return ''.join(ffilter(lambda c : ord(c) >= ord('а') and ord(c) <= ord('я'), word.lower()))
-    def match_word(self, word, lim = 5):
+    def match_word(self, word, lim = 5) -> MatchResult | None:
         # print('Searching for ' + word)
         PARAMS = {
             'format' : 'json',
@@ -91,14 +91,11 @@ class WikiTargeter(Targeter):
                 res_word = WikiTargeter.only_letters(resp[1][i].split()[0])
                 print(word, res_word)
                 if self.stemmer.stem(res_word).lower() == self.stemmer.stem(word).lower():
-                    return {
-                        'definition' : resp[2][i],
-                        'link' : resp[3][i]
-                    }
+                    return MatchResult(resp[3][i], resp[2][i])
             return None
         except:
             return None
-    def match_words(self, words, lim = 5):
+    def match_words(self, words, lim = 5) -> dict[str, MatchResult | None]:
         q = mp.Pool()
         results = q.map(self.match_word, words)
         return {words[i].lower() : results[i] for i in range(len(words)) if results[i] is not None}
@@ -110,7 +107,7 @@ class WiktionaryTargeter(Targeter):
     @staticmethod
     def only_letters(word):
         return ''.join(ffilter(lambda c : ord(c) >= ord('а') and ord(c) <= ord('я'), word.lower()))
-    def match_word(self, word, lim = 5):
+    def match_word(self, word, lim = 5) -> MatchResult | None:
         # print('Searching for ' + word)
         PARAMS = {
             'format' : 'json',
@@ -121,10 +118,7 @@ class WiktionaryTargeter(Targeter):
         }
         resp = get(self.wiktionary, PARAMS).json()
         try:
-            return {
-                'link':resp[3][0],
-                'definition': None
-            }
+            return MatchResult(resp[3][0], None)
         except:
             return None
     def match_words(self, words, lim = 5):

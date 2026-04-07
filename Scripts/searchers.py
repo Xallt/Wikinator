@@ -38,8 +38,8 @@ class Searcher:
 
     # Returns list of TermLinks extracted from main_api_page
     @classmethod
-    def get_term_links(cls):
-        pass
+    def get_term_links(cls) -> list[TermLink]:
+        raise NotImplementedError("Subclass must implement this method")
     @classmethod
     def is_word(cls, line):
         return re.match(r'^[а-яА-Я]+$', line)
@@ -51,7 +51,7 @@ class BiologySearcher(Searcher):
     @classmethod
     def get_term_links(cls):
         soup = BeautifulSoup(requests.get(cls.main_api_page).text, 'html.parser')
-        a_tags = soup.findAll('a')
+        a_tags = soup.find_all('a')
         right_tags = ffilter(
             lambda s: s.text.capitalize() == s.text and \
             s.get('href') is not None and \
@@ -81,7 +81,7 @@ class GeographySearcher(Searcher):
     @classmethod
     def get_term_links(cls):
         soup=BeautifulSoup(requests.get(cls.main_api_page).text, 'html.parser')
-        a_tags=soup.findAll("a")
+        a_tags=soup.find_all("a")
         right_tags=ffilter(
             lambda s: s.get('href') is not None and \
             re.match(r'\d+\.htm', s.get('href')) and \
@@ -95,7 +95,8 @@ class GeographySearcher(Searcher):
         )
     @classmethod
     def get_definition(cls, url):
-        return BeautifulSoup(requests.get(url).content, 'html.parser').find('span', {'itemprop' : 'definition'}).text
+        soup = BeautifulSoup(requests.get(url).content, 'html.parser').find('span', {'itemprop' : 'definition'})
+        return soup.text if soup is not None else None
 class PhysicalSearcher(Searcher):
     main_api_page='http://www.physics.org.ua/info/voc/a.html'
     @classmethod
@@ -103,7 +104,8 @@ class PhysicalSearcher(Searcher):
         return re.match(r'^[А-Я]+$', word)
     @classmethod
     def term_links_from_url(cls, url):
-        lines = BeautifulSoup(requests.get(url).content, 'html.parser').findAll('p', {'class' : 'MsoNormal'})
+        soup = BeautifulSoup(requests.get(url).content, 'html.parser')
+        lines = soup.find_all('p', {'class' : 'MsoNormal'})
         res = []
         for line in lines:
             if len(line.text.split()) <= 1:
@@ -114,11 +116,21 @@ class PhysicalSearcher(Searcher):
         return res
     @classmethod
     def get_term_links(cls):
-        pages = BeautifulSoup(requests.get(cls.main_api_page).content, 'html.parser').find('marquee').findAll('a')
+        soup = BeautifulSoup(requests.get(cls.main_api_page).content, 'html.parser')
+        if soup is None:
+            return []
+        marquee = soup.find('marquee')
+        if marquee is None:
+            return []
+        pages = marquee.find_all('a')
         res = []
         pre_link = 'http://www.physics.org.ua/info/voc/'
         for i in pages:
-            res += cls.term_links_from_url(pre_link + i.get('href'))
+            href = i.get('href')
+            if href is None:
+                continue
+            href = str(href)
+            res += cls.term_links_from_url(pre_link + href)
         return res
 class AstronomicalSearcher(Searcher):
     main_api_page = 'http://www.astronet.ru/db/glossary/_e1'
@@ -127,7 +139,10 @@ class AstronomicalSearcher(Searcher):
     def termlinks_from_url(cls, url):
         if url is None:
             return []
-        a_list = BeautifulSoup(requests.get(url).content, 'html.parser').findAll('a')
+        soup = BeautifulSoup(requests.get(url).content, 'html.parser')
+        if soup is None:
+            return []
+        a_list = soup.find_all('a')
         pre_link = 'http://www.astronet.ru'
         a_correct = ffilter(
             lambda a : (a.get('href').startswith('/db/msg') or a.get('href').startswith(pre_link + '/db/msg')) and cls.is_word(a.text),
@@ -135,10 +150,14 @@ class AstronomicalSearcher(Searcher):
         )
         res = []
         for a in a_correct:
-            if a.get('href').startswith('/db/msg'):
-                res.append(TermLink(a.text, pre_link + a.get('href')))
+            href = a.get('href')
+            if href is None:
+                continue
+            href = str(href)
+            if href.startswith('/db/msg'):
+                res.append(TermLink(a.text, pre_link + href))
             else:
-                res.append(TermLink(a.text, a.get('href')))
+                res.append(TermLink(a.text, href))
         return res
     @classmethod
     def get_term_links(cls):
@@ -148,12 +167,16 @@ class AstronomicalSearcher(Searcher):
         letter_links = ffilter(
             lambda a : len(a.text) == 1 and \
              ord('А') <= ord(a.text) <= ord('Я'),
-            b.findAll('a')
+            b.find_all('a')
         )
         letter_dict = {}
         pre_link = 'http://www.astronet.ru'
         for l in letter_links:
-            letter_dict[l.text.lower()] = pre_link + l.get('href')
+            href = l.get('href')
+            if href is None:
+                continue
+            href = str(href)
+            letter_dict[l.text.lower()] = pre_link + href
         for k, v in letter_dict.items():
             if k != 'А':
                 termlinks += cls.termlinks_from_url(v)
@@ -163,7 +186,8 @@ class AstronomicalSearcher(Searcher):
         b = BeautifulSoup(requests.get(url).content.decode('windows-1251'), 'html.parser')
         definition = b.find('span', {'itemprop' : 'definition'})
         if definition is not None:
-            return b.find('span', {'itemprop' : 'definition'}).text
+            definision_span = definition.find('span', {'itemprop' : 'definition'})
+            return definision_span.text if definision_span is not None else None
         else:
             p_list = b.select("#content p")
             for p in p_list:
