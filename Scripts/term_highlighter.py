@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import multiprocessing as mp
-
 import requests
 
 from Scripts import searchers, targeter
@@ -38,11 +36,12 @@ class TermHighlighter:
             return None
     def __init__(self, modes):
         self.searchers_dict = {}
-        q = mp.Pool()
-        results = q.map(TermHighlighter.get_mode_links, modes)
-        for i in range(len(modes)):
+        # Sequential fetch: multiprocessing.Pool at import time breaks under gunicorn
+        # (prefork workers + pool state → hung requests behind reverse_proxy).
+        results = [TermHighlighter.get_mode_links(m) for m in modes]
+        for i, mode in enumerate(modes):
             if results[i] is not None:
-                self.searchers_dict[modes[i]] = results[i]
+                self.searchers_dict[mode] = results[i]
         print("Done initialising")
         self.modes = modes
         self.targeter = None
