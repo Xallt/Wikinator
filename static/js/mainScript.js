@@ -11,7 +11,7 @@ function highlighterPlainText() {
     return el.innerText != null ? el.innerText : $(el).text();
 }
 function status(value, color) {
-    $("#status").html(value);
+    $("#status").text(value);
     $("#status").css("color", color);
 }
 function activateHighlight(highlightedText) {
@@ -20,7 +20,7 @@ function activateHighlight(highlightedText) {
         return this.hasAttribute('definition');
     }).each(function () {
         $(this).balloon({
-            contents: this.getAttribute("definition"),
+            contents: $("<div>").text(this.getAttribute("definition")).html(),
             css: {
                 fontSize: ".5rem",
                 pointerEvents: "none"
@@ -40,7 +40,7 @@ function highlightText() {
         window.timer = (window.timer + 1) % 3;
     }, 500)
     $("#sendButton").prop("disabled", true);
-    var reqTimeout = 0;
+    var reqTimeout = 120000;
     $.ajax({
         url: "/highlightWithMode",
         timeout: reqTimeout,
@@ -64,7 +64,7 @@ function highlightText() {
         },
         error: function (xhr, message) {
             clearInterval(window.loadAnimationId);
-            status("Error: " + message, redStatus);
+            status((xhr.responseJSON && xhr.responseJSON.error) || ("Error: " + message), redStatus);
             $("#sendButton").prop("disabled", false);
         }
     })

@@ -1,102 +1,59 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-import requests
+"""Load usable sources once and keep highlighting state within each request."""
+from concurrent.futures import ThreadPoolExecutor
+from html import escape
+import logging
+import re
 
-from Scripts import searchers, targeter
+from Scripts.searchers import SEARCHERS, load_terms
+from Scripts.sources import SourceUnavailable
+from Scripts.targeter import TermListTargeter, WikiTargeter, WiktionaryTargeter
 
-SEARCHERS = {
-    "Biology" : searchers.BiologySearcher,
-    "Geography" : searchers.GeographySearcher,
-    "Physics" : searchers.PhysicalSearcher,
-    "Astronomy" : searchers.AstronomicalSearcher
-}
+MODES = (*SEARCHERS, "Wiki", "Wiktionary")
+WORDS = re.compile(r"[а-яёА-ЯЁ]+")
 
-DEFAULT_SEPS=list('\n\t .,/\\<>?!@"\'#$%^&*()[]{}:;~`|+' + u'«»') + ['- ', ' -']
 
 class TermHighlighter:
-    @staticmethod
-    def highlight_term(word, term_link, definition):
-        if term_link is None:
-            return word
-        else:
-            if definition is None:
-                return "<a href=\"{}\" class=\"termlink\" contenteditable=\"false\">{}</a>".format(term_link, word)
-            else:
-                return "<a href=\"{}\" class=\"termlink\" contenteditable=\"false\" definition=\"{}\">{}</a>".format(term_link, definition, word)
-    @staticmethod
-    def get_mode_links(mode):
-        if mode not in SEARCHERS:
-            return None
-        try:
-            links = SEARCHERS[mode].get_term_links()
-            print("Got " + mode)
-            return links
-        except requests.exceptions.RequestException:
-            print("Skipped " + mode + " (failed to resolve)")
-            return None
-    def __init__(self, modes):
-        self.searchers_dict = {}
-        # Sequential fetch: multiprocessing.Pool at import time breaks under gunicorn
-        # (prefork workers + pool state → hung requests behind reverse_proxy).
-        results = [TermHighlighter.get_mode_links(m) for m in modes]
-        for i, mode in enumerate(modes):
-            if results[i] is not None:
-                self.searchers_dict[mode] = results[i]
-        print("Done initialising")
-        self.modes = modes
-        self.targeter = None
-    def use_mode(self, mode):
-        if mode in self.searchers_dict:
-            definition_getter = None
-            if SEARCHERS[mode].can_get_definition:
-                definition_getter = SEARCHERS[mode].get_definition
-            self.targeter = targeter.TermListTargeter(self.searchers_dict.get(mode), definition_getter)
-        elif mode == 'Wiki' and mode in self.modes:
-            self.targeter = targeter.WikiTargeter()
-        elif mode == 'Wiktionary' and mode in self.modes:
-            self.targeter = targeter.WiktionaryTargeter()
-        else:
-            raise ValueError("Invalid mode: " + mode)
-    def highlight_text(self, text):
-        if self.targeter is None:
-            raise ValueError("Targeter is not initialized")
-        if self.targeter.targets_many():
-            return self.highlight_many(text)
-        else:
-            return self.highlight_single(text)
-    def highlight_single(self, text, seps=DEFAULT_SEPS):
-        if self.targeter is None:
-            raise ValueError("Targeter is not initialized")
-        for s in seps:
-            if s in text:
-                return s.join([self.choose_words(t, seps) for t in text.split(s)])
-        parsed_word = self.targeter.match_word(text)
-        if parsed_word is None:
-            return text
-        else:
-            return TermHighlighter.highlight_term(text, parsed_word.link, parsed_word.definition)
-    def highlight_many(self, text):
-        if self.targeter is None:
-            raise ValueError("Targeter is not initialized")
-        form_text, words = TermHighlighter.choose_words(text, DEFAULT_SEPS)
-        matches: dict[str, targeter.MatchResult | None] = self.targeter.match_words(words)
+    def __init__(self, modes=MODES):
+        self.targeters = {}
+        self.unavailable = []
 
-        res = []
-        for w in words:
-            match = matches.get(w.lower())
-            if match is not None:
-                res.append(TermHighlighter.highlight_term(w, match.link, match.definition))
-            else:
-                res.append(w)
-        return form_text.format(*res)
+        def load(mode):
+            try:
+                if mode in SEARCHERS:
+                    return mode, TermListTargeter(load_terms(mode), SEARCHERS[mode].get_definition)
+                targeter = WikiTargeter() if mode == "Wiki" else WiktionaryTargeter()
+                if targeter.match_word("атом") is None:
+                    raise SourceUnavailable("Source probe found no reference")
+                return mode, targeter
+            except SourceUnavailable as error:
+                logging.warning("%s unavailable: %s", mode, error)
+                return mode, None
+
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            for mode, targeter in pool.map(load, modes):
+                if targeter is not None:
+                    self.targeters[mode] = targeter
+                else:
+                    self.unavailable.append(mode)
+        self.modes = list(self.targeters)
+
     @staticmethod
-    def choose_words(text, seps=DEFAULT_SEPS):
-        for s in seps:
-            if s in text:
-                ss, ww = [], []
-                for t in text.split(s):
-                    chosen = TermHighlighter.choose_words(t)
-                    ss.append(chosen[0])
-                    ww += chosen[1]
-                return (s.join(ss), ww)
-        return '{}', [text]
+    def highlight_term(word, link, definition):
+        tooltip = f' definition="{escape(definition, quote=True)}"' if definition else ""
+        return f'<a href="{escape(link, quote=True)}" class="termlink" contenteditable="false"{tooltip}>{escape(word)}</a>'
+
+    def highlight_text(self, text, mode):
+        if mode not in self.targeters:
+            raise ValueError("Choose an available source")
+        targeter = self.targeters[mode]
+        matches = targeter.match_words(WORDS.findall(text))
+        parts = []
+        previous = 0
+        for word in WORDS.finditer(text):
+            parts.append(escape(text[previous:word.start()]))
+            match = matches.get(word.group().lower())
+            parts.append(self.highlight_term(word.group(), match.link, match.definition)
+                         if match else escape(word.group()))
+            previous = word.end()
+        parts.append(escape(text[previous:]))
+        return "".join(parts)
